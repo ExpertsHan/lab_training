@@ -3,12 +3,22 @@
 > 作業原文：<https://cal-cs180.github.io/fa26/hw/proj1/index.html>
 > 繳交方式：<https://cal-cs180.github.io/fa26/hw/submitting.html>
 >
-> 這份文件**不會給你完整的解答程式碼**。它的目標是：
+> 這份文件的目標是：
 > 1. 把整個 project 拆成可以一步一步驗證的小關卡（每關都有 ✅ 檢查點）
 > 2. 每一關先講「你需要懂的觀念」，再講「要做什麼」，最後給「提示」
 > 3. 提示分層放在可折疊的 `<details>` 裡——**卡住再打開**，先自己想
+> 4. 每一節最後都有「📦 本節完整範例程式碼」（同樣折疊起來），內容都已在實際資料上跑過驗證
 >
-> 程式片段只會出現在「純粹的 API 用法」（例如怎麼讀檔）或「函式介面」，核心邏輯會用虛擬碼（pseudocode）與數學式描述，由你自己實作。
+> 正文中的核心邏輯仍以虛擬碼與數學式描述；建議先照著正文自己實作，再展開範例對照。範例程式的檔案結構：
+>
+> | 檔案 | 內容 | 出現在 |
+> |---|---|---|
+> | `code/align.py` | 讀圖、切割、L2/NCC、平移、單尺度、金字塔、`colorize` | 關卡一～六逐步累加 |
+> | `code/enhance.py` | 自動裁切、對比、白平衡、色彩映射 | 關卡十 |
+> | `code/main.py` | 批次處理所有影像、計時、輸出 JPG 與位移 CSV | 關卡七 |
+> | `code/s0X_*.py`、`debug_tools.py`、`tests.py` … | 每一節的示範／檢查腳本 | 各節 |
+>
+> 所有指令都在 `project1/` 底下執行，例如 `python code/main.py`。
 
 ---
 
@@ -125,6 +135,55 @@ project1/
 
 > 📌 作業最後提醒：「你在 Project 2 會再用到 image pyramid——寫乾淨、可重用的程式」。所以把金字塔寫成**獨立、通用的函式**，不要和這次的對齊邏輯綁死。
 
+### 1.4 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+執行 `python code/s01_check_env.py`：印出套件版本、列出 `data/` 內所有影像與大小，並建立 `out/`、`web/images/`。之後所有腳本都假設你在 `project1/` 底下執行。
+
+<details>
+<summary>🖥️ 建立環境（bash）</summary>
+
+```bash
+cd ~/Documents/lab_training/CV/project1
+python3 -m venv .venv
+source .venv/bin/activate
+pip install numpy scipy scikit-image matplotlib
+mkdir -p code out web/images
+```
+</details>
+
+<details>
+<summary>📄 <code>code/s01_check_env.py</code></summary>
+
+```python
+"""關卡 1：確認環境與資料。執行：python code/s01_check_env.py"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import skimage
+import matplotlib
+
+print("Python     :", sys.version.split()[0])
+print("numpy      :", np.__version__)
+print("scikit-image:", skimage.__version__)
+print("matplotlib :", matplotlib.__version__)
+
+data = Path("data")
+assert data.is_dir(), "找不到 data/，請確認是在 project1/ 底下執行，且已解壓 data.zip"
+
+files = sorted(data.glob("*.jpg")) + sorted(data.glob("*.tif"))
+print(f"\n共 {len(files)} 張影像：")
+for f in files:
+    print(f"  {f.name:<24} {f.stat().st_size / 1e6:8.1f} MB")
+
+for d in ["out", "web/images"]:
+    Path(d).mkdir(parents=True, exist_ok=True)
+print("\n已建立 out/ 與 web/images/")
+```
+</details>
+
 ---
 
 ## 2. 背景知識：數位影像就是陣列
@@ -158,6 +217,45 @@ shape 為 `(H, W, 3)`，最後一維依序是 R、G、B（對 `skimage` / `matpl
 `skimage.img_as_float(img)` 會根據原始 dtype 自動除以正確的最大值。
 
 > 🧠 **學到的知識**：影像處理中最常見的 bug 之一就是型別問題。養成習慣：**讀進來立刻轉 float，存檔前才轉回整數型別**。
+
+### 2.4 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+執行 `python code/s02_arrays.py`，親眼看到座標慣例、`uint8` 溢位，以及 `img_as_float` 對不同 dtype 的處理。
+
+<details>
+<summary>📄 <code>code/s02_arrays.py</code></summary>
+
+```python
+"""關卡 2 背景知識：陣列、座標、dtype。執行：python code/s02_arrays.py"""
+import numpy as np
+from skimage import img_as_float
+
+# 2.1 灰階影像 = 2D 陣列：img[row, col] = img[y, x]
+img = np.zeros((4, 6))          # H=4（y 方向）, W=6（x 方向）
+img[1, 4] = 1.0                 # y=1, x=4
+print("shape (H, W) =", img.shape)
+print(img)
+
+# 2.2 彩色影像 = 3D 陣列 (H, W, 3)，最後一維是 R, G, B
+rgb = np.zeros((2, 2, 3))
+rgb[0, 0] = [1, 0, 0]           # 左上角是紅色
+print("rgb shape =", rgb.shape)
+
+# 2.3 uint8 溢位
+a = np.array([200], dtype=np.uint8)
+b = np.array([250], dtype=np.uint8)
+print("uint8 200 - 250 =", a - b)                      # [206]，不是 -50
+print("float 200 - 250 =", a.astype(float) - b)        # [-50.]
+
+# img_as_float 會依 dtype 除以正確的最大值
+u8 = np.array([0, 128, 255], dtype=np.uint8)
+u16 = np.array([0, 32768, 65535], dtype=np.uint16)
+print("uint8  ->", img_as_float(u8))
+print("uint16 ->", img_as_float(u16))
+```
+</details>
 
 ---
 
@@ -201,6 +299,79 @@ im = img_as_float(im)
 
 > 🧠 **學到的知識**：同一個場景在不同波長濾鏡下的「亮度」不同——這正是後面 `emir.tif` 會失敗的根本原因。現在先記住這個觀察。
 
+### 3.5 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+兩份程式：**獨立腳本**讓你直接跑看結果；**`align.py` 的開頭**把同樣的邏輯整理成可重用的函式（後面每一關都會往 `align.py` 裡加函式）。
+
+<details>
+<summary>📄 <code>code/s03_split.py</code>（獨立腳本）</summary>
+
+```python
+"""關卡一：讀圖並切成 B、G、R。執行：python code/s03_split.py data/cathedral.jpg"""
+import sys
+
+import numpy as np
+import matplotlib.pyplot as plt
+import skimage.io as skio
+from skimage import img_as_float
+
+path = sys.argv[1] if len(sys.argv) > 1 else "data/cathedral.jpg"
+
+im = skio.imread(path)
+print("原始:", im.dtype, im.shape, "min/max =", im.min(), im.max())
+im = img_as_float(im)
+print("float:", im.dtype, "min/max =", im.min(), im.max())
+
+h = im.shape[0] // 3                # 每份高度；多出來的 1~2 列丟掉
+b = im[0 * h:1 * h]
+g = im[1 * h:2 * h]
+r = im[2 * h:3 * h]
+assert b.shape == g.shape == r.shape
+print("每個通道 shape:", b.shape)
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 5))
+for ax, ch, name in zip(axes, [b, g, r], ["B", "G", "R"]):
+    ax.imshow(ch, cmap="gray", vmin=0, vmax=1)
+    ax.set_title(f"{name}  mean={ch.mean():.3f}")
+    ax.axis("off")
+plt.tight_layout()
+plt.savefig("out/s03_channels.jpg", dpi=100)
+plt.show()
+```
+</details>
+
+<details>
+<summary>📄 <code>code/align.py</code>（開頭 + 關卡一的函式）</summary>
+
+```python
+"""align.py：Prokudin-Gorskii 三通道對齊的核心函式。"""
+import numpy as np
+import skimage.io as skio
+from skimage import img_as_float
+from scipy.ndimage import gaussian_filter, sobel
+
+
+# ---------- 關卡一：讀圖與切割 ----------
+def load_plate(path):
+    """讀入玻璃底片掃描檔，回傳 float32、值域 [0, 1] 的灰階陣列。"""
+    im = skio.imread(path)
+    if im.ndim == 3:                      # 少數檔案可能被存成多通道，取第一個
+        im = im[..., 0]
+    return img_as_float(im).astype(np.float32)
+
+
+def split_bgr(im):
+    """把高度三等分，依序回傳 (b, g, r)。多出來的 1~2 列直接丟掉。"""
+    h = im.shape[0] // 3
+    b = im[0 * h:1 * h]
+    g = im[1 * h:2 * h]
+    r = im[2 * h:3 * h]
+    return b, g, r
+```
+</details>
+
 ---
 
 ## 4. 關卡二：不對齊直接疊起來（建立 baseline）
@@ -221,6 +392,57 @@ im = img_as_float(im)
 **把這張圖存起來**——它會是你網頁上「Before」的好素材。
 
 > 🧠 **學到的知識**：在報告中，**一個好的 baseline 讓你的方法更有說服力**。之後每加一個改進，都和前一版比較。
+
+### 4.4 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+執行 `python code/s04_baseline.py data/cathedral.jpg`，會存出 `out/cathedral_baseline.jpg`（網頁上的 Before 圖）。
+
+<details>
+<summary>📄 <code>code/s04_baseline.py</code>（獨立腳本）</summary>
+
+```python
+"""關卡二：不對齊直接疊起來。執行：python code/s04_baseline.py data/cathedral.jpg"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+import skimage.io as skio
+from skimage import img_as_float, img_as_ubyte
+
+path = Path(sys.argv[1] if len(sys.argv) > 1 else "data/cathedral.jpg")
+
+im = img_as_float(skio.imread(path))
+h = im.shape[0] // 3
+b, g, r = im[:h], im[h:2 * h], im[2 * h:3 * h]
+
+color = np.dstack([r, g, b])        # 注意：R, G, B 順序！
+color = np.clip(color, 0, 1)
+
+out = Path("out") / f"{path.stem}_baseline.jpg"
+skio.imsave(out, img_as_ubyte(color))
+print("已存:", out)
+
+plt.figure(figsize=(6, 6))
+plt.imshow(color)
+plt.title("No alignment (color fringing)")
+plt.axis("off")
+plt.show()
+```
+</details>
+
+<details>
+<summary>📄 加進 <code>code/align.py</code> 的函式</summary>
+
+```python
+# ---------- 關卡二：疊成彩色 ----------
+def stack_rgb(r, g, b):
+    """注意順序是 R, G, B。"""
+    return np.clip(np.dstack([r, g, b]), 0, 1)
+```
+</details>
 
 ---
 
@@ -305,6 +527,69 @@ def ncc_score(a, b):
 
 > 🧠 **學到的知識**：選擇相似度指標＝選擇你假設兩張圖之間是什麼關係。L2 假設「值相同」，NCC 假設「值線性相關」，之後的 gradient / edge 特徵則假設「結構（邊緣位置）相同」。這個思考框架在整個電腦視覺領域都通用（例如 stereo matching、template matching、影像配準）。
 
+### 5.7 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+這裡採用「兩個 metric 都是**越大越好**」的設計：L2 回傳負的 SSD，搜尋函式一律取最大值。執行 `python code/s05_metrics.py` 會跑完 5.6 的所有單元測試。
+
+<details>
+<summary>📄 <code>code/s05_metrics.py</code>（含單元測試）</summary>
+
+```python
+"""關卡三：L2 / NCC 與單元測試。執行：python code/s05_metrics.py"""
+import numpy as np
+
+
+def l2_score(a, b):
+    """負的 SSD：越大（越接近 0）越好。統一成「越大越好」方便搜尋函式取 max。"""
+    d = a - b
+    return -float(np.sum(d * d))
+
+
+def ncc_score(a, b, eps=1e-8):
+    """Normalized Cross-Correlation，範圍 [-1, 1]，越大越好。"""
+    a = a - a.mean()
+    b = b - b.mean()
+    return float(np.sum(a * b) / (np.linalg.norm(a) * np.linalg.norm(b) + eps))
+
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(0)
+    a = rng.random((100, 120))
+
+    assert np.isclose(ncc_score(a, a), 1.0)
+    assert np.isclose(ncc_score(a, 2 * a + 0.3), 1.0)   # 仿射亮度不變性
+    assert np.isclose(ncc_score(a, -a), -1.0)
+    assert l2_score(a, a) == 0.0
+    print("l2(a, a + 0.3) =", l2_score(a, a + 0.3))      # 很負 → L2 沒有不變性
+    print("ncc(a, random) =", ncc_score(a, rng.random(a.shape)))  # 接近 0
+    print("全部測試通過 ✅")
+```
+</details>
+
+<details>
+<summary>📄 加進 <code>code/align.py</code> 的函式</summary>
+
+```python
+# ---------- 關卡三：相似度指標（統一成「越大越好」） ----------
+def l2_score(a, b):
+    """負的 SSD：越大（越接近 0）越好。"""
+    d = a - b
+    return -float(np.sum(d * d))
+
+
+def ncc_score(a, b, eps=1e-8):
+    """Normalized Cross-Correlation，範圍 [-1, 1]，越大越好。"""
+    a = a - a.mean()
+    b = b - b.mean()
+    return float(np.sum(a * b) / (np.linalg.norm(a) * np.linalg.norm(b) + eps))
+
+
+METRICS = {"l2": l2_score, "ncc": ncc_score}
+```
+</details>
+
 ---
 
 ## 6. 關卡四：平移影像與邊界問題
@@ -363,6 +648,77 @@ def crop_interior(img, frac):
 - 確認 `crop_interior` 輸出的 shape 正確
 
 > 🧠 **學到的知識**：**邊界效應（boundary effect）**在影像處理中無所不在——卷積、平移、濾波都會遇到。常見的處理方式有：裁掉、補零（zero padding）、鏡射（reflect padding）、環繞（wrap）。在這個問題中，最簡單也最有效的是「不看邊界」。
+
+### 6.7 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+執行 `python code/s06_shift.py`：驗證平移方向、裁切後的 shape，並畫出 `np.roll` 的 wrap-around 與裁切後的樣子。
+
+<details>
+<summary>📄 <code>code/s06_shift.py</code></summary>
+
+```python
+"""關卡四：平移與內部裁切。執行：python code/s06_shift.py"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def shift(img, dx, dy):
+    """正 dx 往右、正 dy 往下。axis=0 是 y（row），axis=1 是 x（column）。"""
+    return np.roll(img, shift=(dy, dx), axis=(0, 1))
+
+
+def crop_interior(img, frac):
+    """四周各裁掉 frac 比例，只留中間。"""
+    h, w = img.shape[:2]
+    ch, cw = int(h * frac), int(w * frac)
+    return img[ch:h - ch, cw:w - cw]
+
+
+if __name__ == "__main__":
+    img = np.zeros((10, 10))
+    img[2, 3] = 1                                   # 亮點在 (x=3, y=2)
+    moved = shift(img, dx=4, dy=1)
+    y, x = np.argwhere(moved == 1)[0]
+    print(f"平移後亮點在 (x={x}, y={y})")             # 預期 (7, 3)
+    assert (x, y) == (7, 3)
+
+    big = np.ones((400, 300))
+    print("crop_interior shape:", crop_interior(big, 0.1).shape)   # (320, 240)
+    assert crop_interior(big, 0.1).shape == (320, 240)
+
+    # 看 wrap-around：把一張漸層往右推 30 px，最左邊會出現原本最右邊的亮像素
+    grad = np.tile(np.linspace(0, 1, 200), (100, 1))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
+    axes[0].imshow(grad, cmap="gray"); axes[0].set_title("original")
+    axes[1].imshow(shift(grad, 30, 0), cmap="gray"); axes[1].set_title("roll dx=30 (wrap-around)")
+    axes[2].imshow(crop_interior(shift(grad, 30, 0), 0.2), cmap="gray"); axes[2].set_title("crop 20%")
+    for ax in axes:
+        ax.axis("off")
+    plt.tight_layout()
+    plt.show()
+    print("全部測試通過 ✅")
+```
+</details>
+
+<details>
+<summary>📄 加進 <code>code/align.py</code> 的函式</summary>
+
+```python
+# ---------- 關卡四：平移與裁切 ----------
+def shift(img, dx, dy):
+    """正 dx 往右、正 dy 往下。axis=0 是 y（row），axis=1 是 x（column）。"""
+    return np.roll(img, shift=(dy, dx), axis=(0, 1))
+
+
+def crop_interior(img, frac):
+    """四周各裁掉 frac 比例，只留中間。"""
+    h, w = img.shape[:2]
+    ch, cw = int(h * frac), int(w * frac)
+    return img[ch:h - ch, cw:w - cw]
+```
+</details>
 
 ---
 
@@ -440,6 +796,69 @@ $$
 這就是下一關的動機。
 
 > 🧠 **學到的知識**：窮舉搜尋保證找到搜尋範圍內的全域最佳解，但成本隨搜尋範圍**平方**成長、隨影像大小**線性**成長。兩者都很大時就必須換策略。
+
+### 7.6 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+`align_single_scale` 多了一個 `center` 參數（預設 `(0, 0)`）：在 `center` 附近搜尋。單尺度時用不到，但下一關的金字塔會靠它「在粗層答案附近微調」。`return_scores=True` 會回傳分數地圖，關卡八除錯會用到。
+
+實測結果（RGB NCC 與 L2 都一樣）：cathedral G (2, 5) R (3, 12)；monastery G (2, −3) R (2, 3)；tobolsk G (3, 3) R (3, 6)，每張約 0.3 秒。
+
+<details>
+<summary>📄 加進 <code>code/align.py</code> 的函式</summary>
+
+```python
+# ---------- 關卡五：單尺度窮舉搜尋 ----------
+def align_single_scale(moving, ref, window=15, metric="ncc", crop=0.1,
+                       center=(0, 0), return_scores=False):
+    """
+    在 center 附近 [-window, window]^2 內窮舉 (dx, dy)，回傳讓 moving 最像 ref 的位移 (dx, dy)。
+    return_scores=True 時額外回傳 (2W+1, 2W+1) 的分數地圖（row 對應 dy、col 對應 dx）。
+    """
+    score_fn = METRICS[metric]
+    ref_c = crop_interior(ref, crop)
+    cx, cy = center
+    best_score, best = -np.inf, (cx, cy)
+    scores = np.empty((2 * window + 1, 2 * window + 1))
+    for i, dy in enumerate(range(cy - window, cy + window + 1)):
+        for j, dx in enumerate(range(cx - window, cx + window + 1)):
+            s = score_fn(crop_interior(shift(moving, dx, dy), crop), ref_c)
+            scores[i, j] = s
+            if s > best_score:
+                best_score, best = s, (dx, dy)
+    return (best, scores) if return_scores else best
+```
+</details>
+
+<details>
+<summary>📄 <code>code/s07_single_scale.py</code>（跑三張 JPG、兩種 metric）</summary>
+
+```python
+"""關卡五：單尺度窮舉搜尋。執行：python code/s07_single_scale.py
+（函式本體同 align.py 的 align_single_scale；這裡用 import 重用關卡一～四的函式）"""
+import time
+from pathlib import Path
+
+import skimage.io as skio
+from skimage import img_as_ubyte
+
+from align import load_plate, split_bgr, shift, stack_rgb, align_single_scale
+
+for name in ["cathedral", "monastery", "tobolsk"]:
+    im = load_plate(f"data/{name}.jpg")
+    b, g, r = split_bgr(im)
+    for metric in ["ncc", "l2"]:
+        t0 = time.perf_counter()
+        gx, gy = align_single_scale(g, b, window=15, metric=metric, crop=0.1)
+        rx, ry = align_single_scale(r, b, window=15, metric=metric, crop=0.1)
+        dt = time.perf_counter() - t0
+        color = stack_rgb(shift(r, rx, ry), shift(g, gx, gy), b)
+        out = Path("out") / f"{name}_single_{metric}.jpg"
+        skio.imsave(out, img_as_ubyte(color))
+        print(f"{name:<10} {metric:<4} G: ({gx}, {gy})  R: ({rx}, {ry})  {dt:.2f}s  -> {out}")
+```
+</details>
 
 ---
 
@@ -568,6 +987,320 @@ function align_pyramid(moving, ref):
 > - **Coarse-to-fine** 把搜尋成本從 $O(W^2 N)$ 降到大約 $O(\log W \cdot N)$ 量級，是一種「用近似換速度」的經典策略。
 > - **代價**：如果粗層級找錯了（例如被大片相似紋理誤導），細層級的小視窗**無法修正**。這是金字塔方法的固有風險。
 
+### 8.8 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+這段包含：`downsample`（2×2 區塊平均或高斯模糊再取樣）、`build_pyramid`、**迭代版** `align_pyramid`、**遞迴版** `align_pyramid_recursive`（兩者答案相同），以及把整個流程包起來的 `colorize`。`feature_fn`、`gradient_magnitude` 是為 12.5 準備的，基本版用預設的 `identity` 即可。
+
+> ⚠️ **參數的陷阱（實測踩到的）**：金字塔能找到的最大位移約為 $W_\text{coarse}\cdot 2^L + W_\text{fine}\cdot(2^L - 1)$，$L$ 是降採樣次數。若最粗層停在短邊 ≥ 300 px，TIF 只會縮 8 倍（$L=3$），最大可達約 $15\cdot 8 + 3\cdot 7 = 141$ px——而 `melons`、`self_portrait` 的 R 位移約 **176～178 px**，結果會被卡在 141 而對不齊。所以這裡用 `min_size=150`（縮 16 倍到約 200 px，$L=4$，最大可達約 285 px）。
+
+實測（Apple Silicon）：`church.tif` 每層估計為 (0,4) → (−1,7) → (−1,15) → (−2,29) → (−4,58)，兩個通道合計約 3.4 秒。
+
+<details>
+<summary>📄 加進 <code>code/align.py</code> 的函式</summary>
+
+```python
+# ---------- 關卡六：影像金字塔 ----------
+def downsample(img, method="box", sigma=1.0):
+    """先低通濾波再 2 倍降採樣。method: "box"（2x2 平均）或 "gaussian"。"""
+    if method == "gaussian":
+        return gaussian_filter(img, sigma=sigma)[::2, ::2]
+    h, w = img.shape[0] // 2 * 2, img.shape[1] // 2 * 2
+    img = img[:h, :w]
+    return img.reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3))
+
+
+def build_pyramid(img, min_size=150, method="box"):
+    """回傳 [原圖, 1/2, 1/4, ...]，直到短邊 < 2*min_size 為止（最後一層短邊 >= min_size）。"""
+    pyr = [img]
+    while min(pyr[-1].shape[:2]) >= 2 * min_size:
+        pyr.append(downsample(pyr[-1], method=method))
+    return pyr
+
+
+def identity(x):
+    return x
+
+
+def gradient_magnitude(img):
+    """Sobel 梯度大小，作為「更好的特徵」。"""
+    gx = sobel(img, axis=1)
+    gy = sobel(img, axis=0)
+    return np.hypot(gx, gy)
+
+
+def align_pyramid(moving, ref, metric="ncc", crop=0.1, min_size=150,
+                  coarse_window=15, fine_window=3, feature_fn=identity,
+                  verbose=False):
+    """
+    迭代版 coarse-to-fine 對齊，回傳原圖尺度下的 (dx, dy)。
+    feature_fn 會在每一層把影像轉成特徵圖（例如 gradient_magnitude）後再比較。
+    """
+    pm = build_pyramid(moving, min_size)
+    pr = build_pyramid(ref, min_size)
+    dx, dy = 0, 0
+    for level in range(len(pm) - 1, -1, -1):          # 從最小那層往回
+        m, r = feature_fn(pm[level]), feature_fn(pr[level])
+        window = coarse_window if level == len(pm) - 1 else fine_window
+        dx, dy = align_single_scale(m, r, window=window, metric=metric,
+                                    crop=crop, center=(dx, dy))
+        if verbose:
+            print(f"  level {level} {m.shape}: ({dx}, {dy})")
+        if level > 0:
+            dx, dy = 2 * dx, 2 * dy                   # 放大回下一層的尺度
+    return dx, dy
+
+
+def align_pyramid_recursive(moving, ref, metric="ncc", crop=0.1, min_size=150,
+                            coarse_window=15, fine_window=3):
+    """遞迴版，與 align_pyramid 等價（feature_fn 省略）。"""
+    if min(moving.shape) < 2 * min_size:              # base case
+        return align_single_scale(moving, ref, coarse_window, metric, crop)
+    dx, dy = align_pyramid_recursive(downsample(moving), downsample(ref),
+                                     metric, crop, min_size, coarse_window, fine_window)
+    return align_single_scale(moving, ref, fine_window, metric, crop,
+                              center=(2 * dx, 2 * dy))
+
+
+# ---------- 整合：一張底片 → 彩色圖 ----------
+def colorize(im, method="pyramid", ref="b", **kw):
+    """
+    回傳 (color, shifts)。shifts 是 dict，例如 {"g": (dx, dy), "r": (dx, dy)}。
+    ref="b" 為作業預設；ref="g" 則把 B、R 對齊到 G。
+    """
+    b, g, r = split_bgr(im)
+    chans = {"b": b, "g": g, "r": r}
+    align_fn = align_pyramid if method == "pyramid" else align_single_scale
+    shifts = {}
+    for name in "bgr":
+        if name == ref:
+            continue
+        shifts[name] = align_fn(chans[name], chans[ref], **kw)
+        chans[name] = shift(chans[name], *shifts[name])
+    return stack_rgb(chans["r"], chans["g"], chans["b"]), shifts
+```
+</details>
+
+<details>
+<summary>📄 <code>code/s08_pyramid.py</code>（印出每一層的估計、驗證遞迴版 = 迭代版）</summary>
+
+```python
+"""關卡六：金字塔對齊。執行：python code/s08_pyramid.py data/church.tif"""
+import sys
+import time
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import skimage.io as skio
+from skimage import img_as_ubyte
+
+from align import (load_plate, split_bgr, shift, stack_rgb, build_pyramid,
+                   align_single_scale, align_pyramid, align_pyramid_recursive)
+
+path = Path(sys.argv[1] if len(sys.argv) > 1 else "data/church.tif")
+im = load_plate(path)
+b, g, r = split_bgr(im)
+
+# 1. 看一下金字塔每層的大小
+pyr = build_pyramid(b, min_size=150)
+print("金字塔各層:", [p.shape for p in pyr])
+
+# 2. 迭代版（印出每一層的估計）
+t0 = time.perf_counter()
+print("G -> B"); gx, gy = align_pyramid(g, b, verbose=True)
+print("R -> B"); rx, ry = align_pyramid(r, b, verbose=True)
+dt = time.perf_counter() - t0
+print(f"{path.name}: G ({gx}, {gy})  R ({rx}, {ry})  {dt:.2f}s")
+
+# 3. 遞迴版應該得到相同答案
+assert align_pyramid_recursive(g, b) == (gx, gy)
+assert align_pyramid_recursive(r, b) == (rx, ry)
+
+# 4. JPG 上：金字塔 vs 單尺度
+if path.suffix == ".jpg":
+    print("single-scale G:", align_single_scale(g, b), " R:", align_single_scale(r, b))
+
+color = stack_rgb(shift(r, rx, ry), shift(g, gx, gy), b)
+out = Path("out") / f"{path.stem}_pyramid.jpg"
+skio.imsave(out, img_as_ubyte(color))
+print("已存:", out)
+
+fig, axes = plt.subplots(1, len(pyr), figsize=(3 * len(pyr), 3))
+for i, (ax, p) in enumerate(zip(axes, pyr)):
+    ax.imshow(p, cmap="gray"); ax.set_title(f"level {i}: {p.shape}"); ax.axis("off")
+plt.tight_layout()
+plt.show()
+```
+</details>
+
+<details>
+<summary>📄 完整的 <code>code/align.py</code>（關卡一～六合併後）</summary>
+
+```python
+"""align.py：Prokudin-Gorskii 三通道對齊的核心函式。"""
+import numpy as np
+import skimage.io as skio
+from skimage import img_as_float
+from scipy.ndimage import gaussian_filter, sobel
+
+
+# ---------- 關卡一：讀圖與切割 ----------
+def load_plate(path):
+    """讀入玻璃底片掃描檔，回傳 float32、值域 [0, 1] 的灰階陣列。"""
+    im = skio.imread(path)
+    if im.ndim == 3:                      # 少數檔案可能被存成多通道，取第一個
+        im = im[..., 0]
+    return img_as_float(im).astype(np.float32)
+
+
+def split_bgr(im):
+    """把高度三等分，依序回傳 (b, g, r)。多出來的 1~2 列直接丟掉。"""
+    h = im.shape[0] // 3
+    b = im[0 * h:1 * h]
+    g = im[1 * h:2 * h]
+    r = im[2 * h:3 * h]
+    return b, g, r
+
+
+# ---------- 關卡二：疊成彩色 ----------
+def stack_rgb(r, g, b):
+    """注意順序是 R, G, B。"""
+    return np.clip(np.dstack([r, g, b]), 0, 1)
+
+
+# ---------- 關卡三：相似度指標（統一成「越大越好」） ----------
+def l2_score(a, b):
+    """負的 SSD：越大（越接近 0）越好。"""
+    d = a - b
+    return -float(np.sum(d * d))
+
+
+def ncc_score(a, b, eps=1e-8):
+    """Normalized Cross-Correlation，範圍 [-1, 1]，越大越好。"""
+    a = a - a.mean()
+    b = b - b.mean()
+    return float(np.sum(a * b) / (np.linalg.norm(a) * np.linalg.norm(b) + eps))
+
+
+METRICS = {"l2": l2_score, "ncc": ncc_score}
+
+
+# ---------- 關卡四：平移與裁切 ----------
+def shift(img, dx, dy):
+    """正 dx 往右、正 dy 往下。axis=0 是 y（row），axis=1 是 x（column）。"""
+    return np.roll(img, shift=(dy, dx), axis=(0, 1))
+
+
+def crop_interior(img, frac):
+    """四周各裁掉 frac 比例，只留中間。"""
+    h, w = img.shape[:2]
+    ch, cw = int(h * frac), int(w * frac)
+    return img[ch:h - ch, cw:w - cw]
+
+
+# ---------- 關卡五：單尺度窮舉搜尋 ----------
+def align_single_scale(moving, ref, window=15, metric="ncc", crop=0.1,
+                       center=(0, 0), return_scores=False):
+    """
+    在 center 附近 [-window, window]^2 內窮舉 (dx, dy)，回傳讓 moving 最像 ref 的位移 (dx, dy)。
+    return_scores=True 時額外回傳 (2W+1, 2W+1) 的分數地圖（row 對應 dy、col 對應 dx）。
+    """
+    score_fn = METRICS[metric]
+    ref_c = crop_interior(ref, crop)
+    cx, cy = center
+    best_score, best = -np.inf, (cx, cy)
+    scores = np.empty((2 * window + 1, 2 * window + 1))
+    for i, dy in enumerate(range(cy - window, cy + window + 1)):
+        for j, dx in enumerate(range(cx - window, cx + window + 1)):
+            s = score_fn(crop_interior(shift(moving, dx, dy), crop), ref_c)
+            scores[i, j] = s
+            if s > best_score:
+                best_score, best = s, (dx, dy)
+    return (best, scores) if return_scores else best
+
+
+# ---------- 關卡六：影像金字塔 ----------
+def downsample(img, method="box", sigma=1.0):
+    """先低通濾波再 2 倍降採樣。method: "box"（2x2 平均）或 "gaussian"。"""
+    if method == "gaussian":
+        return gaussian_filter(img, sigma=sigma)[::2, ::2]
+    h, w = img.shape[0] // 2 * 2, img.shape[1] // 2 * 2
+    img = img[:h, :w]
+    return img.reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3))
+
+
+def build_pyramid(img, min_size=150, method="box"):
+    """回傳 [原圖, 1/2, 1/4, ...]，直到短邊 < 2*min_size 為止（最後一層短邊 >= min_size）。"""
+    pyr = [img]
+    while min(pyr[-1].shape[:2]) >= 2 * min_size:
+        pyr.append(downsample(pyr[-1], method=method))
+    return pyr
+
+
+def identity(x):
+    return x
+
+
+def gradient_magnitude(img):
+    """Sobel 梯度大小，作為「更好的特徵」。"""
+    gx = sobel(img, axis=1)
+    gy = sobel(img, axis=0)
+    return np.hypot(gx, gy)
+
+
+def align_pyramid(moving, ref, metric="ncc", crop=0.1, min_size=150,
+                  coarse_window=15, fine_window=3, feature_fn=identity,
+                  verbose=False):
+    """
+    迭代版 coarse-to-fine 對齊，回傳原圖尺度下的 (dx, dy)。
+    feature_fn 會在每一層把影像轉成特徵圖（例如 gradient_magnitude）後再比較。
+    """
+    pm = build_pyramid(moving, min_size)
+    pr = build_pyramid(ref, min_size)
+    dx, dy = 0, 0
+    for level in range(len(pm) - 1, -1, -1):          # 從最小那層往回
+        m, r = feature_fn(pm[level]), feature_fn(pr[level])
+        window = coarse_window if level == len(pm) - 1 else fine_window
+        dx, dy = align_single_scale(m, r, window=window, metric=metric,
+                                    crop=crop, center=(dx, dy))
+        if verbose:
+            print(f"  level {level} {m.shape}: ({dx}, {dy})")
+        if level > 0:
+            dx, dy = 2 * dx, 2 * dy                   # 放大回下一層的尺度
+    return dx, dy
+
+
+def align_pyramid_recursive(moving, ref, metric="ncc", crop=0.1, min_size=150,
+                            coarse_window=15, fine_window=3):
+    """遞迴版，與 align_pyramid 等價（feature_fn 省略）。"""
+    if min(moving.shape) < 2 * min_size:              # base case
+        return align_single_scale(moving, ref, coarse_window, metric, crop)
+    dx, dy = align_pyramid_recursive(downsample(moving), downsample(ref),
+                                     metric, crop, min_size, coarse_window, fine_window)
+    return align_single_scale(moving, ref, fine_window, metric, crop,
+                              center=(2 * dx, 2 * dy))
+
+
+# ---------- 整合：一張底片 → 彩色圖 ----------
+def colorize(im, method="pyramid", ref="b", **kw):
+    """
+    回傳 (color, shifts)。shifts 是 dict，例如 {"g": (dx, dy), "r": (dx, dy)}。
+    ref="b" 為作業預設；ref="g" 則把 B、R 對齊到 G。
+    """
+    b, g, r = split_bgr(im)
+    chans = {"b": b, "g": g, "r": r}
+    align_fn = align_pyramid if method == "pyramid" else align_single_scale
+    shifts = {}
+    for name in "bgr":
+        if name == ref:
+            continue
+        shifts[name] = align_fn(chans[name], chans[ref], **kw)
+        chans[name] = shift(chans[name], *shifts[name])
+    return stack_rgb(chans["r"], chans["g"], chans["b"]), shifts
+```
+</details>
+
 ---
 
 ## 9. 關卡七：批次處理全部影像、計時、輸出
@@ -603,6 +1336,152 @@ cathedral.jpg       |  ( ?,  ?)  |  ( ?,  ?)  |   ?
 - `README.txt` 寫清楚：需要哪些套件、資料放哪裡、怎麼執行、輸出在哪裡
 
 > 🧠 **學到的知識**：研究/工程中，「可重現」和「正確」一樣重要。助教要能用你的 `main.py` 重新產生所有結果。
+
+### 9.5 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+`main.py` 把前面所有東西串起來：同一組固定參數、JPG 跑單尺度 + 金字塔、TIF 只跑金字塔、印出表格並輸出 CSV。所有圖都用 `colorize()`，所以切換 metric / 特徵 / 基準通道只要改命令列參數。
+
+實測輸出（RGB NCC、以 B 為基準，每張 TIF 約 3.5 秒）：
+
+```
+image                   | method  | G (dx, dy)  | R (dx, dy)  | time (s)
+cathedral.jpg           | single  | (2, 5)      | (3, 12)     |   0.29
+monastery.jpg           | single  | (2, -3)     | (2, 3)      |   0.31
+tobolsk.jpg             | single  | (3, 3)      | (3, 6)      |   0.34
+church.tif              | pyramid | (4, 25)     | (-4, 58)    |   3.22
+emir.tif                | pyramid | (24, 49)    | (-205, 141) |   3.40   ← 失敗（見關卡八）
+harvesters.tif          | pyramid | (17, 60)    | (13, 124)   |   3.28
+icon.tif                | pyramid | (17, 41)    | (23, 89)    |   3.34
+ilemselga.tif           | pyramid | (7, 40)     | (11, 130)   |   3.43
+melons.tif              | pyramid | (10, 82)    | (13, 178)   |   3.42
+religous_painting.tif   | pyramid | (3, 28)     | (7, 68)     |   3.36
+self_portrait.tif       | pyramid | (29, 79)    | (37, 176)   |   3.48
+siren.tif               | pyramid | (-6, 49)    | (-25, 96)   |   3.46
+three_generations.tif   | pyramid | (14, 53)    | (11, 112)   |   3.33
+wharf.tif               | pyramid | (-7, 15)    | (-16, 83)   |   3.41
+```
+
+<details>
+<summary>📄 <code>code/main.py</code></summary>
+
+```python
+"""main.py：批次對齊 data/ 下所有影像，印出位移與耗時，並存成 JPG。
+
+用法（在 project1/ 底下執行）：
+    python code/main.py                      # 全部影像，RGB NCC，以 B 為基準
+    python code/main.py --metric l2
+    python code/main.py --feature grad       # 梯度特徵（Bells & Whistles）
+    python code/main.py --only emir church   # 只跑部分檔案
+"""
+import argparse
+import csv
+import time
+from pathlib import Path
+
+import numpy as np
+import skimage.io as skio
+from skimage import img_as_ubyte
+
+from align import (load_plate, colorize, identity, gradient_magnitude)
+
+# ---- 固定參數：所有影像共用同一組 ----
+CROP = 0.1           # 計分時四周各裁 10%
+MIN_SIZE = 150       # 金字塔最粗層短邊下限（TIF 會縮 16 倍到 ~200 px）
+COARSE_WINDOW = 15   # 最粗層搜尋 ±15
+FINE_WINDOW = 3      # 其餘各層微調 ±3
+SINGLE_WINDOW = 15   # 單尺度搜尋 ±15
+
+
+def save_jpg(path, rgb):
+    skio.imsave(path, img_as_ubyte(np.clip(rgb, 0, 1)))
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--data", default="data")
+    p.add_argument("--out", default="out")
+    p.add_argument("--metric", choices=["ncc", "l2"], default="ncc")
+    p.add_argument("--feature", choices=["rgb", "grad"], default="rgb")
+    p.add_argument("--ref", choices=["b", "g"], default="b")
+    p.add_argument("--only", nargs="*", help="只處理這些檔名（不含副檔名）")
+    args = p.parse_args()
+
+    feature_fn = gradient_magnitude if args.feature == "grad" else identity
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tag = f"{args.metric}_{args.feature}_ref{args.ref}"
+
+    paths = sorted(Path(args.data).glob("*.jpg")) + sorted(Path(args.data).glob("*.tif"))
+    if args.only:
+        paths = [q for q in paths if q.stem in args.only]
+
+    rows = []
+    print(f"{'image':<24}| {'method':<8}| {'G (dx, dy)':<12}| {'R (dx, dy)':<12}| {'B (dx, dy)':<12}| time (s)")
+    print("-" * 90)
+    for path in paths:
+        im = load_plate(path)
+        # JPG 兩種方法都跑；TIF 只跑金字塔（單尺度太慢）
+        methods = ["single", "pyramid"] if path.suffix == ".jpg" else ["pyramid"]
+        for method in methods:
+            kw = dict(metric=args.metric, crop=CROP)
+            if method == "single":
+                kw.update(window=SINGLE_WINDOW)
+            else:
+                kw.update(min_size=MIN_SIZE, coarse_window=COARSE_WINDOW,
+                          fine_window=FINE_WINDOW, feature_fn=feature_fn)
+            t0 = time.perf_counter()
+            rgb, shifts = colorize(im, method=method, ref=args.ref, **kw)
+            dt = time.perf_counter() - t0
+
+            save_jpg(out_dir / f"{path.stem}_{method}_{tag}.jpg", rgb)
+            fmt = lambda c: str(shifts.get(c, (0, 0)))
+            print(f"{path.name:<24}| {method:<8}| {fmt('g'):<12}| {fmt('r'):<12}| {fmt('b'):<12}| {dt:6.2f}")
+            rows.append([path.name, method, tag, *shifts.get("g", (0, 0)),
+                         *shifts.get("r", (0, 0)), *shifts.get("b", (0, 0)), round(dt, 2)])
+
+    with open(out_dir / f"offsets_{tag}.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["image", "method", "tag", "g_dx", "g_dy", "r_dx", "r_dy", "b_dx", "b_dy", "time_s"])
+        w.writerows(rows)
+    print(f"\n結果存在 {out_dir}/，位移表：{out_dir}/offsets_{tag}.csv")
+
+
+if __name__ == "__main__":
+    main()
+```
+</details>
+
+<details>
+<summary>📄 <code>code/README.txt</code></summary>
+
+```text
+CS180 Project 1 - Prokudin-Gorskii Colorization
+
+Requirements: Python 3.10+, numpy, scipy, scikit-image, matplotlib
+    pip install numpy scipy scikit-image matplotlib
+
+Layout (run everything from the project root, i.e. the folder containing data/):
+    data/            input plates (.jpg / .tif)
+    code/align.py    core: split, L2/NCC, shift, single-scale search, pyramid
+    code/enhance.py  bells & whistles: auto crop, contrast, white balance, color mapping
+    code/main.py     entry point
+
+Run:
+    python code/main.py                    # all images, RGB NCC, reference = B
+    python code/main.py --metric l2        # L2 instead of NCC
+    python code/main.py --feature grad     # gradient-magnitude features (fixes emir)
+    python code/main.py --only emir        # a subset
+
+Output:
+    out/<name>_<method>_<metric>_<feature>_ref<b|g>.jpg
+    out/offsets_<metric>_<feature>_ref<b|g>.csv   (G/R offsets as (dx, dy) and runtime)
+
+Parameters (same for every image): crop 10% per side when scoring,
+pyramid coarsest short side >= 150 px, coarse window +-15, fine window +-3.
+```
+</details>
 
 ---
 
@@ -647,6 +1526,88 @@ cathedral.jpg       |  ( ?,  ?)  |  ( ?,  ?)  |   ?
 
 > 🧠 **學到的知識**：分析失敗比展示成功更能證明你懂。一個好的失敗分析要回答：「方法的哪個**假設**在這裡被打破了？」
 
+### 10.4 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+`debug_tools.py` 實作了 10.1 表格中的四個工具（放大局部、差異圖、棋盤格、分數地圖），`__main__` 直接拿 `emir.tif` 示範：RGB NCC 把 R 對到 (−205, 141)，梯度 NCC 則得到 (40, 107)。比較兩張分數地圖，你會看到 RGB 版沒有清楚的單一尖峰。
+
+<details>
+<summary>📄 <code>code/debug_tools.py</code></summary>
+
+```python
+"""關卡八：視覺化除錯工具。執行：python code/debug_tools.py data/emir.tif"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from align import load_plate, split_bgr, shift, stack_rgb, align_pyramid, \
+    align_single_scale, downsample, gradient_magnitude
+
+
+def zoom(img, cy, cx, size=200):
+    """以 (cx, cy) 為中心裁 size x size 的區域。"""
+    h = size // 2
+    return img[max(cy - h, 0):cy + h, max(cx - h, 0):cx + h]
+
+
+def diff_image(a, b):
+    """|a - b|：對齊好的地方應該大多接近黑色。"""
+    return np.abs(a - b)
+
+
+def checkerboard(a, b, tile=64):
+    """兩張灰階圖棋盤格交錯，檢查格子邊界上的線條是否連續。"""
+    yy, xx = np.indices(a.shape)
+    mask = ((yy // tile) + (xx // tile)) % 2 == 0
+    return np.where(mask, a, b)
+
+
+def score_map(moving, ref, window=15, metric="ncc", crop=0.1):
+    """回傳 (2W+1, 2W+1) 的分數地圖；row 對應 dy、col 對應 dx。"""
+    _, scores = align_single_scale(moving, ref, window, metric, crop, return_scores=True)
+    return scores
+
+
+if __name__ == "__main__":
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "data/emir.tif")
+    b, g, r = split_bgr(load_plate(path))
+    rx, ry = align_pyramid(r, b)
+    rx2, ry2 = align_pyramid(r, b, feature_fn=gradient_magnitude)
+    print(f"R (RGB NCC): ({rx}, {ry})   R (gradient NCC): ({rx2}, {ry2})")
+
+    r_al = shift(r, rx, ry)
+    cy, cx = b.shape[0] // 2, b.shape[1] // 2
+
+    # 在縮小 16 倍的圖上畫分數地圖（原圖畫會很慢）
+    small = lambda x: downsample(downsample(downsample(downsample(x))))
+    rs, bs = small(r), small(b)
+    s_rgb = score_map(rs, bs)
+    s_grad = score_map(gradient_magnitude(rs), gradient_magnitude(bs))
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 9))
+    axes[0, 0].imshow(zoom(stack_rgb(r_al, shift(g, *align_pyramid(g, b)), b), cy, cx, 400))
+    axes[0, 0].set_title("zoom (RGB NCC result)")
+    axes[0, 1].imshow(diff_image(r_al, b), cmap="gray"); axes[0, 1].set_title("|R_aligned - B|")
+    axes[0, 2].imshow(zoom(checkerboard(r_al, b), cy, cx, 600), cmap="gray")
+    axes[0, 2].set_title("checkerboard R/B")
+    for ax, s, t in [(axes[1, 0], s_rgb, "score map: RGB NCC (1/16)"),
+                     (axes[1, 1], s_grad, "score map: gradient NCC (1/16)")]:
+        im = ax.imshow(s, cmap="viridis", extent=[-15.5, 15.5, 15.5, -15.5])
+        ax.set_xlabel("dx"); ax.set_ylabel("dy"); ax.set_title(t)
+        fig.colorbar(im, ax=ax)
+    axes[1, 2].imshow(zoom(checkerboard(shift(r, rx2, ry2), b), cy, cx, 600), cmap="gray")
+    axes[1, 2].set_title("checkerboard R/B (gradient)")
+    for ax in [axes[0, 0], axes[0, 1], axes[0, 2], axes[1, 2]]:
+        ax.axis("off")
+    plt.tight_layout()
+    plt.savefig(f"out/{path.stem}_debug.jpg", dpi=80)
+    plt.show()
+```
+</details>
+
 ---
 
 ## 11. 關卡九：自己挑 3 張以上 LoC 影像
@@ -672,6 +1633,47 @@ Library of Congress 的 Prokudin-Gorskii 典藏：<https://www.loc.gov/collectio
 ### 11.4 ✅ 檢查點
 
 用**完全相同的參數**跑這些圖，把結果與位移加入網頁表格。
+
+### 11.5 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+下載 LoC 底片後先執行 `python code/s11_inspect_loc.py data/xxxxxu.tif`，檢查 dtype、高寬比（三格垂直排列應約為 3），並預覽三個通道。確認沒問題後，把檔案放進 `data/`，再跑 `python code/main.py --only xxxxxu`，參數完全不用改。
+
+<details>
+<summary>📄 <code>code/s11_inspect_loc.py</code></summary>
+
+```python
+"""關卡九：檢查從 LoC 下載的底片。執行：python code/s11_inspect_loc.py data/xxxxxu.tif"""
+import sys
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import skimage.io as skio
+
+from align import load_plate, split_bgr
+
+path = Path(sys.argv[1])
+raw = skio.imread(path)
+print(f"{path.name}: dtype={raw.dtype}, shape={raw.shape}, "
+      f"size={path.stat().st_size / 1e6:.1f} MB")
+if raw.ndim != 2:
+    print("⚠️ 不是單通道灰階；load_plate 會只取第一個通道")
+h, w = raw.shape[:2]
+if not 2.4 < h / w < 3.6:
+    print(f"⚠️ 高寬比 {h / w:.2f} 不像三格垂直排列（預期約 3），請確認下載的是 glass negative")
+
+b, g, r = split_bgr(load_plate(path))
+fig, axes = plt.subplots(1, 4, figsize=(14, 5), gridspec_kw={"width_ratios": [1, 1, 1, 1]})
+axes[0].imshow(raw if raw.ndim == 2 else raw[..., 0], cmap="gray"); axes[0].set_title("plate")
+for ax, ch, n in zip(axes[1:], [b, g, r], "BGR"):
+    ax.imshow(ch, cmap="gray"); ax.set_title(n)
+for ax in axes:
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
+```
+</details>
 
 ---
 
@@ -809,6 +1811,185 @@ $$
 > - 影像增強（對比、白平衡）沒有唯一正解，評估往往需要視覺比較 + 客觀指標並用
 > - 「改變表示法（raw pixel → gradient）」常常比「調參數」更能解決根本問題
 
+### 12.8 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+12.5 的梯度特徵已經在 `align.py` 裡（`gradient_magnitude` + `align_pyramid(..., feature_fn=...)`），命令列用 `python code/main.py --feature grad` 或 `--ref g` 切換。其餘 12.1～12.4 放在 `enhance.py`，`s12_bells.py` 用 emir 串起整條管線並畫出 before / after 與直方圖。
+
+實測（emir）：RGB NCC 的 R = (−205, 141) ❌；梯度 NCC 的 R = (40, 107) ✅；以 G 為基準時 R→G = (17, 57)，換算回 B 基準約 (41, 106) ✅。
+
+> ⚠️ `detect_borders` 是啟發式方法：在 14 張圖上大致能去掉黑白邊與錯位色帶，但遇到靠近邊緣的大片亮天空（例如 harvesters 頂端）會多裁一些（最多裁到 `max_frac`，也就是 10%）。這正好可以寫進網頁的討論。
+>
+> 12.4 的 `fit_color_matrix` 在範例裡只用「自己 → 自己」驗證會解出單位矩陣；實際使用時請把 target 換成「與你的結果已對齊、同尺寸」的 LoC 官方修復版。12.6（旋轉/縮放）與 12.7（其他資料）屬於自由發揮，沒有附範例。
+
+<details>
+<summary>📄 <code>code/enhance.py</code></summary>
+
+```python
+"""enhance.py：Bells & Whistles —— 自動裁切、自動對比、白平衡、色彩映射。"""
+import numpy as np
+from skimage import color as skcolor, exposure
+
+
+# ---------- 12.1 自動裁切 ----------
+def _border_extent(profile_bad, max_frac):
+    """profile_bad：從外往內排列的布林陣列（True = 像邊框）。回傳要裁掉幾列/行。"""
+    n = int(len(profile_bad) * max_frac)
+    bad = np.flatnonzero(profile_bad[:n])
+    return int(bad[-1]) + 1 if bad.size else 0
+
+
+def detect_borders(rgb, max_frac=0.1, extreme=0.05, dev_thr=0.3):
+    """
+    回傳 (top, bottom, left, right)：每一邊要裁掉的像素數。
+    一列/一行被視為「邊框」若：
+      (1) 任一通道的平均值接近純黑或純白（< extreme 或 > 1 - extreme），或
+      (2) 任一通道的平均值和「該通道所有列/行平均的中位數」相差 > dev_thr
+          ——內容區域三通道彼此一致、變化平緩；邊框和 np.roll 繞回來的色帶則會在
+            某個通道突然變得很亮或很暗。
+    只在外側 max_frac 比例內尋找，取該範圍內「最內側」的邊框列/行。
+    """
+    def bad_profile(axis):
+        means = rgb.mean(axis=axis)                     # (N, 3)：每列/行、每通道的平均
+        dev = np.abs(means - np.median(means, axis=0))  # 與中位數（代表內容）的差距
+        return ((means.min(axis=1) < extreme) | (means.max(axis=1) > 1 - extreme)
+                | (dev.max(axis=1) > dev_thr))
+
+    rows = bad_profile(axis=1)                          # 每一列（沿 x 平均）
+    cols = bad_profile(axis=0)                          # 每一行（沿 y 平均）
+    top = _border_extent(rows, max_frac)
+    bottom = _border_extent(rows[::-1], max_frac)
+    left = _border_extent(cols, max_frac)
+    right = _border_extent(cols[::-1], max_frac)
+    return top, bottom, left, right
+
+
+def auto_crop(rgb, **kw):
+    t, b, l, r = detect_borders(rgb, **kw)
+    h, w = rgb.shape[:2]
+    return rgb[t:h - b, l:w - r], (t, b, l, r)
+
+
+# ---------- 12.2 自動對比 ----------
+def auto_contrast(rgb, low=1, high=99):
+    """三通道共用同一個線性映射：第 low 百分位 → 0，第 high 百分位 → 1。"""
+    lo, hi = np.percentile(rgb, [low, high])
+    return np.clip((rgb - lo) / (hi - lo + 1e-8), 0, 1)
+
+
+def auto_contrast_clahe(rgb, clip_limit=0.01):
+    """只對 Lab 的 L（亮度）做 CLAHE，避免改變色相。"""
+    lab = skcolor.rgb2lab(rgb)
+    lab[..., 0] = exposure.equalize_adapthist(lab[..., 0] / 100, clip_limit=clip_limit) * 100
+    return np.clip(skcolor.lab2rgb(lab), 0, 1)
+
+
+# ---------- 12.3 自動白平衡 ----------
+def white_balance(rgb, method="gray_world", pct=99):
+    """
+    gray_world ：讓三通道平均值相等
+    white_patch：讓三通道第 pct 百分位相等（比 max 穩健）
+    以 G 通道為基準（G 的增益 = 1）。
+    """
+    flat = rgb.reshape(-1, 3)
+    if method == "gray_world":
+        illum = flat.mean(axis=0)
+    else:
+        illum = np.percentile(flat, pct, axis=0)
+    gains = illum[1] / (illum + 1e-8)
+    return np.clip(rgb * gains, 0, 1), gains
+
+
+# ---------- 12.4 色彩映射 ----------
+def fit_color_matrix(src_rgb, target_rgb, n_samples=200_000, seed=0):
+    """
+    用最小平方法解 M (3x3) 與偏移 t (3,)，使 target ≈ src @ M.T + t。
+    src、target 必須已經對齊且 shape 相同。
+    """
+    rng = np.random.default_rng(seed)
+    X = src_rgb.reshape(-1, 3)
+    Y = target_rgb.reshape(-1, 3)
+    idx = rng.choice(len(X), size=min(n_samples, len(X)), replace=False)
+    X1 = np.hstack([X[idx], np.ones((len(idx), 1))])  # 加一行常數項
+    sol, *_ = np.linalg.lstsq(X1, Y[idx], rcond=None)  # (4, 3)
+    return sol[:3].T, sol[3]
+
+
+def apply_color_matrix(rgb, M, t=np.zeros(3)):
+    return np.clip(rgb @ M.T + t, 0, 1)
+```
+</details>
+
+<details>
+<summary>📄 <code>code/s12_bells.py</code></summary>
+
+```python
+"""關卡十：Bells & Whistles 示範。執行：python code/s12_bells.py data/emir.tif"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+import skimage.io as skio
+from skimage import img_as_ubyte
+
+from align import colorize, load_plate, gradient_magnitude
+from enhance import (detect_borders, auto_crop, auto_contrast, auto_contrast_clahe,
+                     white_balance, fit_color_matrix, apply_color_matrix)
+
+path = Path(sys.argv[1] if len(sys.argv) > 1 else "data/emir.tif")
+im = load_plate(path)
+save = lambda name, x: skio.imsave(f"out/{path.stem}_{name}.jpg", img_as_ubyte(np.clip(x, 0, 1)))
+
+# 12.5 更好的特徵：RGB NCC vs 梯度 NCC（vs 以 G 為基準）
+rgb_basic, s1 = colorize(im)
+rgb_grad, s2 = colorize(im, feature_fn=gradient_magnitude)
+_, s3 = colorize(im, ref="g")
+print("RGB NCC     :", s1)
+print("gradient NCC:", s2)
+print("ref = G     :", s3)
+save("basic", rgb_basic); save("grad", rgb_grad)
+
+# 12.1 自動裁切
+t, b, l, r = detect_borders(rgb_grad)
+cropped, _ = auto_crop(rgb_grad)
+print("裁切 (top, bottom, left, right) =", (t, b, l, r))
+save("cropped", cropped)
+
+# 12.2 自動對比
+contrast = auto_contrast(cropped, 1, 99)
+clahe = auto_contrast_clahe(cropped)
+save("contrast", contrast); save("clahe", clahe)
+
+# 12.3 自動白平衡
+wb_gw, gains_gw = white_balance(contrast, "gray_world")
+wb_wp, gains_wp = white_balance(contrast, "white_patch")
+print("gray world gains :", gains_gw.round(3))
+print("white patch gains:", gains_wp.round(3))
+save("wb_grayworld", wb_gw); save("wb_whitepatch", wb_wp)
+
+# 12.4 色彩映射：示範用「自己 → 自己」驗證 lstsq 會解出單位矩陣。
+# 實際使用時把 target 換成「已對齊、同尺寸」的 LoC 官方修復彩色版。
+M, t_off = fit_color_matrix(contrast, contrast)
+print("M (應接近單位矩陣):\n", M.round(3), "\noffset:", t_off.round(3))
+
+# Before / after 並排 + 直方圖
+fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+for ax, (title, x) in zip(axes[0], [("basic RGB NCC", rgb_basic), ("gradient + crop", cropped),
+                                    ("+ contrast", contrast), ("+ white patch", wb_wp)]):
+    ax.imshow(x); ax.set_title(title); ax.axis("off")
+for ax, (title, x) in zip(axes[1], [("hist: cropped", cropped), ("hist: contrast", contrast),
+                                    ("hist: CLAHE", clahe), ("hist: white patch", wb_wp)]):
+    for c, col in enumerate("rgb"):
+        ax.hist(x[..., c].ravel()[::50], bins=128, range=(0, 1), color=col, alpha=0.4)
+    ax.set_title(title)
+plt.tight_layout()
+plt.savefig(f"out/{path.stem}_bells.jpg", dpi=70)
+plt.show()
+```
+</details>
+
 ---
 
 ## 13. 關卡十一：網頁報告與繳交
@@ -867,6 +2048,164 @@ submission.zip
 - 程式碼**不要**公開放在網路上（網頁 repo 和程式碼要分開，或確保網頁 repo 裡沒有程式碼）
 - 網頁 URL：同時交到 Google Form（課程 gallery）與 Gradescope
 
+### 13.5 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+`make_web_images.py` 把 `out/` 的結果縮成寬度 ≤ 1200 px 放進 `web/images/`，並把位移 CSV 轉成 HTML 表格 `web/offsets_table.html`（直接貼進網頁）。`index.html` 是可以直接改的骨架，章節對應 13.2，用 MathJax 顯示公式。
+
+<details>
+<summary>📄 <code>code/make_web_images.py</code></summary>
+
+```python
+"""關卡十一：產生網頁用的縮圖與位移表 HTML。
+執行：python code/make_web_images.py out/offsets_ncc_rgb_refb.csv"""
+import csv
+import sys
+from pathlib import Path
+
+import skimage.io as skio
+from skimage import img_as_float, img_as_ubyte
+from skimage.transform import rescale
+
+MAX_W = 1200
+csv_path = Path(sys.argv[1] if len(sys.argv) > 1 else "out/offsets_ncc_rgb_refb.csv")
+web = Path("web/images")
+web.mkdir(parents=True, exist_ok=True)
+
+# 1. 把 out/ 的結果縮到寬度 <= 1200 px
+for f in sorted(Path("out").glob("*.jpg")):
+    img = img_as_float(skio.imread(f))
+    if img.shape[1] > MAX_W:
+        img = rescale(img, MAX_W / img.shape[1], channel_axis=2, anti_aliasing=True)
+    skio.imsave(web / f.name, img_as_ubyte(img))
+print("縮圖已存到", web)
+
+# 2. 把位移 CSV 轉成 HTML 表格（貼進 index.html）
+with open(csv_path) as fh:
+    rows = list(csv.DictReader(fh))
+lines = ["<table>", "  <tr><th>image</th><th>method</th><th>G (dx, dy)</th>"
+         "<th>R (dx, dy)</th><th>time (s)</th></tr>"]
+for r in rows:
+    lines.append(f"  <tr><td>{r['image']}</td><td>{r['method']}</td>"
+                 f"<td>({r['g_dx']}, {r['g_dy']})</td><td>({r['r_dx']}, {r['r_dy']})</td>"
+                 f"<td>{r['time_s']}</td></tr>")
+lines.append("</table>")
+Path("web/offsets_table.html").write_text("\n".join(lines), encoding="utf-8")
+print("表格已存到 web/offsets_table.html")
+```
+</details>
+
+<details>
+<summary>📄 <code>web/index.html</code>（網頁骨架）</summary>
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS180 Project 1 – Colorizing the Prokudin-Gorskii Collection</title>
+  <script>
+    window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] } };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml.js" defer></script>
+  <style>
+    body { max-width: 960px; margin: 0 auto; padding: 24px 16px; font: 17px/1.65 system-ui, sans-serif; color: #222; }
+    h1 { font-size: 2rem; margin-bottom: 0; }
+    h2 { margin-top: 2.5rem; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    img { max-width: 100%; height: auto; display: block; }
+    figure { margin: 1rem 0; }
+    figcaption { font-size: 0.9rem; color: #666; text-align: center; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: center; }
+    th { background: #f5f5f5; }
+    code { background: #f3f3f3; padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Colorizing the Prokudin-Gorskii Collection</h1>
+  <p>CS180 Project 1 · Your Name</p>
+
+  <h2>1. Introduction</h2>
+  <p>Sergei Prokudin-Gorskii photographed the Russian Empire (1909–1915) by exposing three
+     black-and-white plates through blue, green and red filters. The goal of this project is to
+     split each glass plate into its B, G, R channels, find the (x, y) offsets that align G and R to B,
+     and stack them into a single color image.</p>
+  <figure><img src="images/cathedral_baseline.jpg" alt="raw plate stacked without alignment">
+    <figcaption>Stacking the three channels without alignment produces color fringing.</figcaption></figure>
+
+  <h2>2. Single-scale alignment</h2>
+  <h3>2.1 Metrics</h3>
+  <p>L2 (SSD): $\sum (A-B)^2$, lower is better. NCC:
+     $\frac{\sum (a-\bar a)(b-\bar b)}{\|a-\bar a\|\,\|b-\bar b\|}$, higher is better, and invariant to
+     $B = \alpha A + \beta$.</p>
+  <h3>2.2 Borders</h3>
+  <p>Scores are computed only on the interior (10% cropped from every side) so the plate borders and the
+     wrap-around from <code>np.roll</code> do not dominate.</p>
+  <h3>2.3 Exhaustive search</h3>
+  <p>Search every (dx, dy) in [−15, 15]² and keep the best score.</p>
+  <h3>2.4 Results</h3>
+  <div class="grid">
+    <figure><img src="images/cathedral_single_ncc.jpg" alt=""><figcaption>cathedral · G (2, 5) · R (3, 12)</figcaption></figure>
+    <figure><img src="images/monastery_single_ncc.jpg" alt=""><figcaption>monastery · G (2, −3) · R (2, 3)</figcaption></figure>
+    <figure><img src="images/tobolsk_single_ncc.jpg" alt=""><figcaption>tobolsk · G (3, 3) · R (3, 6)</figcaption></figure>
+  </div>
+
+  <h2>3. Multi-scale pyramid</h2>
+  <p>Why it is needed, how downsampling with anti-aliasing works, the coarse-to-fine loop,
+     parameter choices and running time.</p>
+
+  <h2>4. Results (all images)</h2>
+  <!-- 貼上 web/offsets_table.html 的內容 -->
+  <div class="grid">
+    <figure><img src="images/church_pyramid_ncc_rgb_refb.jpg" alt=""><figcaption>church · G (4, 25) · R (−4, 58)</figcaption></figure>
+    <!-- 其餘圖片依此類推 -->
+  </div>
+
+  <h2>5. Failure analysis: emir</h2>
+  <div class="pair">
+    <figure><img src="images/emir_basic.jpg" alt=""><figcaption>RGB NCC: R fails</figcaption></figure>
+    <figure><img src="images/emir_grad.jpg" alt=""><figcaption>Gradient NCC: fixed</figcaption></figure>
+  </div>
+
+  <h2>6. Bells &amp; Whistles</h2>
+  <p>For each: motivation → method → before / after.</p>
+
+  <h2>7. What I learned</h2>
+  <p>…</p>
+</body>
+</html>
+```
+</details>
+
+<details>
+<summary>🖥️ 部署到 GitHub Pages 與打包繳交（bash）</summary>
+
+```bash
+# 1. 網頁（只放 web/，不要放程式碼）
+cd web
+git init && git add index.html images/
+git commit -m "project 1 page"
+git branch -M main
+git remote add origin https://github.com/<你的帳號>/cs180-proj1.git
+git push -u origin main
+# 到 GitHub repo → Settings → Pages → Branch: main / root
+
+# 2. 瀏覽器開啟網頁 → 列印 → 存成 PDF（勾選頁首與頁尾）→ 存成 web/page.pdf
+
+# 3. 打包（code/ 裡不能有圖片）
+cd ..
+mkdir -p submission/code submission/web
+cp code/*.py code/README.txt submission/code/
+cp web/page.pdf submission/web/
+(cd submission && zip -r ../submission.zip code web)
+unzip -l submission.zip   # 檢查內容與大小（< 100 MB）
+```
+</details>
+
 ---
 
 ## 14. 最終檢查清單
@@ -902,6 +2241,63 @@ submission.zip
 - [ ] `web/page.pdf` 頁首/頁尾含 URL
 - [ ] Google Form 已填
 - [ ] Gradescope 已上傳並附上網頁 URL
+
+### 📦 本節完整範例程式碼
+
+> 建議先自己完成本節，卡住或寫完後再展開對照。
+
+交件前執行 `python code/tests.py`：檢查 metric、平移方向、降採樣、**合成位移能否被找回**（包含在 church.tif 上平移 (120, −90) 這種大位移），以及三張 JPG 的位移是否在預期值 ±1 px 內。
+
+<details>
+<summary>📄 <code>code/tests.py</code></summary>
+
+```python
+"""最終自我檢查。執行：python code/tests.py"""
+import time
+
+import numpy as np
+
+from align import (load_plate, split_bgr, shift, crop_interior, l2_score, ncc_score,
+                   align_single_scale, align_pyramid, downsample, build_pyramid)
+
+rng = np.random.default_rng(0)
+
+# 1. metric
+a = rng.random((64, 64))
+assert np.isclose(ncc_score(a, 2 * a + 0.3), 1.0)
+assert np.isclose(ncc_score(a, -a), -1.0)
+assert l2_score(a, a) == 0 and l2_score(a, a + 0.3) < -100
+
+# 2. shift / crop 方向
+img = np.zeros((10, 10)); img[2, 3] = 1
+assert tuple(np.argwhere(shift(img, 4, 1) == 1)[0]) == (3, 7)
+assert crop_interior(np.ones((400, 300)), 0.1).shape == (320, 240)
+
+# 3. downsample / pyramid
+assert downsample(np.ones((101, 64))).shape == (50, 32)
+assert all(min(p.shape) >= 150 for p in build_pyramid(np.ones((3200, 3700))))
+
+# 4. 已知位移能否找回來：把 B 平移 (dx, dy) 當作 moving，應該找回 (-dx, -dy)
+b, g, r = split_bgr(load_plate("data/cathedral.jpg"))
+for dx, dy in [(5, -7), (-3, 12)]:
+    assert align_single_scale(shift(b, dx, dy), b) == (-dx, -dy)
+    assert align_pyramid(shift(b, dx, dy), b) == (-dx, -dy)
+
+b, g, r = split_bgr(load_plate("data/church.tif"))
+t0 = time.perf_counter()
+assert align_pyramid(shift(b, 120, -90), b) == (-120, 90)
+print(f"大位移合成測試 OK（{time.perf_counter() - t0:.1f}s）")
+
+# 5. 作業 JPG 的位移
+expected = {"cathedral": ((2, 5), (3, 12)), "monastery": ((2, -3), (2, 3)),
+            "tobolsk": ((3, 3), (3, 6))}
+for name, (eg, er) in expected.items():
+    b, g, r = split_bgr(load_plate(f"data/{name}.jpg"))
+    got = (align_single_scale(g, b), align_single_scale(r, b))
+    assert all(abs(u - v) <= 1 for p, q in zip(got, (eg, er)) for u, v in zip(p, q)), (name, got)
+print("全部測試通過 ✅")
+```
+</details>
 
 ---
 
