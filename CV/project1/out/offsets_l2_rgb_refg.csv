@@ -1,0 +1,3 @@
+image,method,tag,g_dx,g_dy,r_dx,r_dy,b_dx,b_dy,time_s
+cathedral.jpg,single,l2_rgb_refg,0,0,1,7,-2,-5,0.39
+cathedral.jpg,pyramid,l2_rgb_refg,0,0,1,7,-2,-5,0.11

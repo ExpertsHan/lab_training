@@ -1,0 +1,2 @@
+image,method,tag,g_dx,g_dy,r_dx,r_dy,b_dx,b_dy,time_s
+emir.tif,pyramid,ncc_grad_refb,24,49,40,107,0,0,6.74
