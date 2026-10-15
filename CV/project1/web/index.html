@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS180 Project 1 – Colorizing the Prokudin-Gorskii Collection</title>
+  <script>
+    window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] } };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml.js" defer></script>
+  <style>
+    :root { --text: #222; --muted: #666; --line: #e2e2e2; --soft: #f6f6f4; --accent: #b4442b; --ok: #2f7d4a; }
+    * { box-sizing: border-box; }
+    body { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); background: #fff; }
+    header { border-bottom: 3px solid var(--text); padding-bottom: 16px; margin-bottom: 8px; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: 0 0 6px; }
+    .byline { color: var(--muted); margin: 0; }
+    h2 { margin-top: 3rem; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+    h3 { margin-top: 1.8rem; }
+    a { color: var(--accent); }
+    img { max-width: 100%; height: auto; display: block; border-radius: 3px; }
+    figure { margin: 1.2rem 0; break-inside: avoid; }
+    figcaption { font-size: 0.88rem; color: var(--muted); text-align: center; margin-top: 6px; }
+    figcaption b { color: var(--text); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 18px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .pair, .grid-2 { grid-template-columns: 1fr; } }
+    .narrow { max-width: 420px; margin-left: auto; margin-right: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.93rem; margin: 1rem 0; font-variant-numeric: tabular-nums; }
+    th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: center; }
+    th { background: var(--soft); }
+    td:first-child { text-align: left; }
+    tr.fail td { background: #fbeae6; }
+    tr.fixed td { background: #e8f4ec; }
+    .table-wrap { overflow-x: auto; }
+    code { background: #f1f1ef; padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+    pre { background: var(--soft); border: 1px solid var(--line); padding: 12px 14px; border-radius: 4px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+    .note { background: var(--soft); border-left: 4px solid var(--accent); padding: 10px 16px; margin: 1.2rem 0; }
+    .note p { margin: 0.3rem 0; }
+    nav.toc { background: var(--soft); padding: 12px 20px; border-radius: 4px; margin: 24px 0; }
+    nav.toc ol { margin: 4px 0; padding-left: 20px; }
+    nav.toc a { color: var(--text); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    .bad { color: var(--accent); font-weight: 600; }
+    .good { color: var(--ok); font-weight: 600; }
+    @media print {
+      body { max-width: none; padding: 0; font-size: 12pt; }
+      nav.toc { display: none; }
+      .grid-2, .pair { grid-template-columns: 1fr 1fr; }
+      .grid { grid-template-columns: repeat(3, 1fr); }
+      .narrow img { max-height: 380px; width: auto; margin: 0 auto; }
+      h2 { break-after: avoid; }
+      a { color: var(--text); text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Colorizing the Prokudin-Gorskii Collection</h1>
+    <p class="byline">CS180 Project 1 · John Chan</p>
+  </header>
+
+  <nav class="toc">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#intro">Introduction</a></li>
+      <li><a href="#single">Single-scale alignment</a></li>
+      <li><a href="#pyramid">Multi-scale pyramid</a></li>
+      <li><a href="#results">Results on all images</a></li>
+      <li><a href="#failure">Failure analysis: emir</a></li>
+      <li><a href="#bells">Bells &amp; Whistles: gradient features</a></li>
+      <li><a href="#learned">What I learned</a></li>
+    </ol>
+  </nav>
+
+  <!-- ===================================================== 1 -->
+  <h2 id="intro">1. Introduction</h2>
+  <p>Between 1909 and 1915, Sergei Mikhailovich Prokudin-Gorskii travelled across the Russian Empire
+     with a special camera. For every scene he exposed three black-and-white glass plates in quick
+     succession, each through a different color filter: <b>blue</b>, <b>green</b> and <b>red</b>.
+     He never saw his photographs in color the way we can today, but the plates survived and were
+     digitized by the Library of Congress.</p>
+  <p>Each digitized plate stacks the three exposures vertically (B on top, then G, then R).
+     Because the camera and the subject moved slightly between exposures, simply cutting the plate into
+     thirds and stacking them as RGB gives a blurry image with strong color fringes. The goal of
+     this project is to <b>find the $(dx, dy)$ shift that aligns G and R to B</b> automatically, and
+     produce a clean color image.</p>
+
+  <div class="pair">
+    <figure class="narrow"><img src="images/cathedral_plate.jpg" alt="Raw cathedral glass plate with B, G, R exposures stacked vertically">
+      <figcaption>The raw plate: B, G, R from top to bottom.</figcaption></figure>
+    <figure><img src="images/cathedral_baseline.jpg" alt="Three channels stacked without alignment, showing color fringing">
+      <figcaption><b>Baseline:</b> cut into thirds and stacked with no alignment → color fringing everywhere.</figcaption></figure>
+  </div>
+
+  <!-- ===================================================== 2 -->
+  <h2 id="single">2. Single-scale alignment</h2>
+
+  <h3>2.1 Splitting the plate</h3>
+  <p>The image is read and converted to float in $[0, 1]$ right away (TIFs are 16-bit, JPGs 8-bit, so
+     this puts both on the same scale). The height is divided by 3 and the plate is cut into three
+     equally sized channels. Each channel has a different overall brightness, because each filter lets
+     through a different amount of light. This matters for choosing a metric.</p>
+  <figure><img src="images/s03_channels.jpg" alt="B, G and R channels of cathedral shown side by side with their mean brightness">
+    <figcaption>The three channels of <code>cathedral.jpg</code>. Same scene, different brightness (mean 0.45 / 0.54 / 0.58).</figcaption></figure>
+
+  <h3>2.2 Scoring an alignment: L2 vs. NCC</h3>
+  <p>To compare a shifted channel $A$ with the reference channel $B$ we need a score.</p>
+  <ul>
+    <li><b>L2 / Sum of Squared Differences</b> — lower is better:
+      $$\text{SSD}(A, B) = \sum_{x,y} \big(A(x,y) - B(x,y)\big)^2$$
+      Simple and fast, but it assumes the two channels have the <i>same brightness</i>.
+      If one channel is globally brighter, every pixel adds to the error even when the alignment is perfect.</li>
+    <li><b>Normalized Cross-Correlation (NCC)</b> — higher is better (max 1):
+      $$\text{NCC}(A, B) = \frac{\sum (A-\bar A)(B-\bar B)}{\lVert A-\bar A\rVert\,\lVert B-\bar B\rVert}$$
+      Subtracting the mean removes brightness offsets, and dividing by the norm removes contrast
+      differences. So NCC is unchanged if $B = \alpha A + \beta$ with $\alpha &gt; 0$, which is
+      exactly the kind of difference we see between the filtered channels.</li>
+  </ul>
+  <p>Both metrics are implemented; NCC is the default for all results below.</p>
+
+  <h3>2.3 Ignoring the borders</h3>
+  <p>The plates have black and white borders, scratches and uneven edges that are <i>different</i> in each
+     channel. Also, I shift images with <code>np.roll</code>, which wraps pixels around from one side to the
+     other. If the score included the edges, these artifacts would dominate it. So the score is computed only
+     on the <b>interior: 10% is cropped from every side</b> before comparing. Using a fraction (not a fixed
+     number of pixels) means the same setting works for 400 px JPGs and 3000 px TIFs.</p>
+
+  <h3>2.4 Exhaustive search</h3>
+  <p>For each candidate shift $(dx, dy) \in [-15, 15]^2$ (961 candidates), shift the moving channel,
+     crop both, and compute the score. Keep the shift with the best score. B is the reference; G and R are
+     each aligned to B independently.</p>
+<pre>for dy in -15..15:
+    for dx in -15..15:
+        s = NCC( crop(shift(moving, dx, dy)), crop(ref) )
+        keep (dx, dy) with the highest s</pre>
+
+  <h3>2.5 Results on the small JPGs</h3>
+  <p>All three JPGs align cleanly. <b>L2 and NCC give exactly the same offsets</b> on these images, which
+     makes sense: their channels differ mostly by brightness, and after cropping the borders, both
+     metrics find the same peak. Each search takes about 0.4–0.7 s.</p>
+  <div class="grid">
+    <figure><img src="images/cathedral_single_ncc_rgb_refb.jpg" alt="cathedral aligned"><figcaption><b>cathedral</b> · G (2, 5) · R (3, 12)</figcaption></figure>
+    <figure><img src="images/monastery_single_ncc_rgb_refb.jpg" alt="monastery aligned"><figcaption><b>monastery</b> · G (2, −3) · R (2, 3)</figcaption></figure>
+    <figure><img src="images/tobolsk_single_ncc_rgb_refb.jpg" alt="tobolsk aligned"><figcaption><b>tobolsk</b> · G (3, 3) · R (3, 6)</figcaption></figure>
+  </div>
+
+  <div class="table-wrap">
+  <table>
+    <tr><th>image</th><th>metric</th><th>G (dx, dy)</th><th>R (dx, dy)</th><th>time (s)</th></tr>
+    <tr><td>cathedral.jpg</td><td>L2</td><td>(2, 5)</td><td>(3, 12)</td><td>0.42</td></tr>
+    <tr><td>cathedral.jpg</td><td>NCC</td><td>(2, 5)</td><td>(3, 12)</td><td>0.67</td></tr>
+    <tr><td>monastery.jpg</td><td>L2</td><td>(2, −3)</td><td>(2, 3)</td><td>0.35</td></tr>
+    <tr><td>monastery.jpg</td><td>NCC</td><td>(2, −3)</td><td>(2, 3)</td><td>0.63</td></tr>
+    <tr><td>tobolsk.jpg</td><td>L2</td><td>(3, 3)</td><td>(3, 6)</td><td>0.36</td></tr>
+    <tr><td>tobolsk.jpg</td><td>NCC</td><td>(3, 3)</td><td>(3, 6)</td><td>0.58</td></tr>
+  </table>
+  </div>
+  <p>Offsets are in pixels, $(dx, dy)$ = (right, down), relative to the B channel.</p>
+
+  <!-- ===================================================== 3 -->
+  <h2 id="pyramid">3. Multi-scale pyramid</h2>
+
+  <h3>3.1 Why single-scale is not enough</h3>
+  <p>The TIF scans are about <b>3200 × 3600 px per channel</b>, roughly 70× more pixels than the JPGs.
+     The offsets are also much bigger: up to ~180 px for R. To find that with brute force we would need a
+     $[-180, 180]^2$ window, i.e. about 130,000 candidates, each scored on millions of pixels.
+     Extrapolating from my JPG timing, that would take <b>hours per image</b>.</p>
+
+  <h3>3.2 Building the pyramid (with anti-aliasing)</h3>
+  <p>An image pyramid is a stack of the same image at decreasing resolutions, each level half the size of
+     the one below. To go down one level I average every 2 × 2 block of pixels (a box filter) instead of
+     just taking every second pixel. Taking every second pixel throws away information and lets fine detail
+     (grass, fabric, film grain) <i>alias</i> into fake coarse patterns, which can mislead the search
+     at the coarse levels. Averaging first acts as a low-pass filter and removes those frequencies.</p>
+  <div class="pair">
+    <figure><img src="images/aliasing_naive.jpg" alt="Downsampled by taking every 2nd pixel, grainy"><figcaption>Every 2nd pixel, 3 times (÷8): <span class="bad">noisy, grainy</span></figcaption></figure>
+    <figure><img src="images/aliasing_box.jpg" alt="Downsampled by 2x2 averaging, smooth"><figcaption>2 × 2 average, 3 times (÷8): <span class="good">smooth, faithful</span></figcaption></figure>
+  </div>
+  <p>Levels are added until the next one would have a short side under 150 px. For a TIF this gives
+     5 levels:</p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>level</th><th>scale</th><th>size (church, B)</th><th>search window</th><th>covers at full res</th></tr>
+    <tr><td>4 (coarsest)</td><td>1/16</td><td>200 × 227</td><td>±15</td><td>±240 px</td></tr>
+    <tr><td>3</td><td>1/8</td><td>400 × 454</td><td>±3 around 2 × previous</td><td>refine</td></tr>
+    <tr><td>2</td><td>1/4</td><td>800 × 908</td><td>±3 around 2 × previous</td><td>refine</td></tr>
+    <tr><td>1</td><td>1/2</td><td>1601 × 1817</td><td>±3 around 2 × previous</td><td>refine</td></tr>
+    <tr><td>0 (original)</td><td>1</td><td>3202 × 3634</td><td>±3 around 2 × previous</td><td>final offset</td></tr>
+  </table>
+  </div>
+
+  <h3>3.3 Coarse-to-fine search</h3>
+  <ol>
+    <li>Build pyramids for both the moving channel and the reference.</li>
+    <li>At the <b>coarsest</b> level, run the exhaustive search with a ±15 window. At 1/16 scale, that
+        covers ±240 px in the original, more than any offset in the dataset.</li>
+    <li>Go up one level: <b>double</b> the offset (every pixel is now two pixels), then search only a small
+        ±3 window around it to fix the rounding error from the coarser level.</li>
+    <li>Repeat until the original resolution. The last refined offset is the answer.</li>
+  </ol>
+<pre>dx, dy = 0, 0
+for level from coarsest to finest:
+    window = 15 if coarsest else 3
+    dx, dy = best shift in window around (dx, dy) at this level
+    if not finest: dx, dy = 2*dx, 2*dy</pre>
+
+  <h3>3.4 Parameters and running time</h3>
+  <p>One fixed set of parameters is used for <b>every</b> image, with no per-image tuning:</p>
+  <ul>
+    <li><b>Interior crop:</b> 10% per side (same as single-scale).</li>
+    <li><b>Coarsest level:</b> short side ≥ 150 px. Small enough that a ±15 search is cheap, big enough
+        that the image still has real structure to match.</li>
+    <li><b>Coarse window ±15:</b> covers ±240 px at full resolution.</li>
+    <li><b>Fine window ±3:</b> an error of ±1 px at the coarser level becomes ±2 px after doubling, so ±3 is
+        enough with a small margin. Keeping it small matters most at the finest level, where each score
+        costs the most.</li>
+  </ul>
+  <p>Result: each TIF (both G and R) is aligned in <b>about 5–6 seconds</b> on my laptop, instead of hours.
+     On the JPGs the pyramid gives exactly the same offsets as the single-scale search, which is a good sanity check.</p>
+
+  <!-- ===================================================== 4 -->
+  <h2 id="results">4. Results on all images</h2>
+  <p>All results use the <b>basic method: NCC on raw RGB pixel values</b>, B as reference, pyramid with the
+     parameters above. <b>13 / 14</b> images align correctly; <code>emir</code> fails in R
+     (see <a href="#failure">section 5</a>).</p>
+
+  <div class="table-wrap">
+  <table>
+    <tr><th>image</th><th>method</th><th>G (dx, dy)</th><th>R (dx, dy)</th><th>time (s)</th></tr>
+    <tr><td>cathedral.jpg</td><td>pyramid</td><td>(2, 5)</td><td>(3, 12)</td><td>0.20</td></tr>
+    <tr><td>monastery.jpg</td><td>pyramid</td><td>(2, −3)</td><td>(2, 3)</td><td>0.24</td></tr>
+    <tr><td>tobolsk.jpg</td><td>pyramid</td><td>(3, 3)</td><td>(3, 6)</td><td>0.33</td></tr>
+    <tr><td>church.tif</td><td>pyramid</td><td>(4, 25)</td><td>(−4, 58)</td><td>5.27</td></tr>
+    <tr class="fail"><td>emir.tif</td><td>pyramid</td><td>(24, 49)</td><td>(−205, 141) ✗</td><td>5.71</td></tr>
+    <tr><td>harvesters.tif</td><td>pyramid</td><td>(17, 60)</td><td>(13, 124)</td><td>5.79</td></tr>
+    <tr><td>icon.tif</td><td>pyramid</td><td>(17, 41)</td><td>(23, 89)</td><td>5.94</td></tr>
+    <tr><td>ilemselga.tif</td><td>pyramid</td><td>(7, 40)</td><td>(11, 130)</td><td>6.09</td></tr>
+    <tr><td>melons.tif</td><td>pyramid</td><td>(11, 82)</td><td>(13, 178)</td><td>6.06</td></tr>
+    <tr><td>religous_painting.tif</td><td>pyramid</td><td>(3, 28)</td><td>(7, 68)</td><td>5.69</td></tr>
+    <tr><td>self_portrait.tif</td><td>pyramid</td><td>(29, 79)</td><td>(37, 176)</td><td>5.94</td></tr>
+    <tr><td>siren.tif</td><td>pyramid</td><td>(−6, 49)</td><td>(−25, 96)</td><td>5.79</td></tr>
+    <tr><td>three_generations.tif</td><td>pyramid</td><td>(14, 53)</td><td>(11, 112)</td><td>5.74</td></tr>
+    <tr><td>wharf.tif</td><td>pyramid</td><td>(−7, 15)</td><td>(−16, 83)</td><td>5.78</td></tr>
+  </table>
+  </div>
+  <p>Note how the R offset is usually about twice the G offset: the three plates were exposed one after another,
+     so whatever drifted (camera or plate holder) kept drifting in the same direction.</p>
+
+  <div class="grid-2">
+    <figure><img src="images/church_pyramid_ncc_rgb_refb.jpg" alt="church" loading="lazy"><figcaption><b>church</b> · G (4, 25) · R (−4, 58)</figcaption></figure>
+    <figure><img src="images/emir_pyramid_ncc_rgb_refb.jpg" alt="emir, misaligned red channel" loading="lazy"><figcaption><b>emir</b> · G (24, 49) · R (−205, 141) · <span class="bad">R fails</span></figcaption></figure>
+    <figure><img src="images/harvesters_pyramid_ncc_rgb_refb.jpg" alt="harvesters" loading="lazy"><figcaption><b>harvesters</b> · G (17, 60) · R (13, 124)</figcaption></figure>
+    <figure><img src="images/icon_pyramid_ncc_rgb_refb.jpg" alt="icon" loading="lazy"><figcaption><b>icon</b> · G (17, 41) · R (23, 89)</figcaption></figure>
+    <figure><img src="images/ilemselga_pyramid_ncc_rgb_refb.jpg" alt="ilemselga" loading="lazy"><figcaption><b>ilemselga</b> · G (7, 40) · R (11, 130)</figcaption></figure>
+    <figure><img src="images/melons_pyramid_ncc_rgb_refb.jpg" alt="melons" loading="lazy"><figcaption><b>melons</b> · G (11, 82) · R (13, 178)</figcaption></figure>
+    <figure><img src="images/religous_painting_pyramid_ncc_rgb_refb.jpg" alt="religious painting" loading="lazy"><figcaption><b>religous_painting</b> · G (3, 28) · R (7, 68)</figcaption></figure>
+    <figure><img src="images/self_portrait_pyramid_ncc_rgb_refb.jpg" alt="self portrait" loading="lazy"><figcaption><b>self_portrait</b> · G (29, 79) · R (37, 176)</figcaption></figure>
+    <figure><img src="images/siren_pyramid_ncc_rgb_refb.jpg" alt="siren" loading="lazy"><figcaption><b>siren</b> · G (−6, 49) · R (−25, 96)</figcaption></figure>
+    <figure><img src="images/three_generations_pyramid_ncc_rgb_refb.jpg" alt="three generations" loading="lazy"><figcaption><b>three_generations</b> · G (14, 53) · R (11, 112)</figcaption></figure>
+    <figure><img src="images/wharf_pyramid_ncc_rgb_refb.jpg" alt="wharf" loading="lazy"><figcaption><b>wharf</b> · G (−7, 15) · R (−16, 83)</figcaption></figure>
+  </div>
+
+  <h3>4.1 Additional images from the Library of Congress</h3>
+  <p>I also downloaded plates from the
+     <a href="https://www.loc.gov/collections/prokudin-gorskii/">Prokudin-Gorskii Collection</a> and ran them
+     through the <b>same code with the same parameters</b> (no tuning). They align cleanly; single-scale
+     and pyramid give identical offsets.</p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>image (LoC id)</th><th>method</th><th>G (dx, dy)</th><th>R (dx, dy)</th><th>time (s)</th></tr>
+    <tr><td>prok-00000-00016v</td><td>pyramid</td><td>(1, 4)</td><td>(2, 10)</td><td>0.27</td></tr>
+    <tr><td>prok-00200-00276v</td><td>pyramid</td><td>(1, 4)</td><td>(2, 14)</td><td>0.26</td></tr>
+    <!-- TODO: third extra image -->
+  </table>
+  </div>
+  <div class="grid">
+    <figure><img src="images/service-pnp-prok-00000-00016v_pyramid_ncc_rgb_refb.jpg" alt="Man standing beside railway tracks below a rocky hillside" loading="lazy"><figcaption><b>prok-00000-00016v</b> · G (1, 4) · R (2, 10)</figcaption></figure>
+    <figure><img src="images/service-pnp-prok-00200-00276v_pyramid_ncc_rgb_refb.jpg" alt="Row of wooden log buildings with trees and a tree stump" loading="lazy"><figcaption><b>prok-00200-00276v</b> · G (1, 4) · R (2, 14)</figcaption></figure>
+    <!-- TODO: third extra image -->
+  </div>
+
+  <!-- ===================================================== 5 -->
+  <h2 id="failure">5. Failure analysis: emir</h2>
+  <p>With RGB NCC, G aligns fine, but R lands at <b>(−205, 141)</b>, far away from where it should be.
+     The zoom below shows a whole second, shifted copy of the Emir in cyan and red.</p>
+  <figure><img src="images/emir_zoom_ncc_rgb_refb.jpg" alt="Zoom on emir showing a doubled ghost image from the misaligned red channel">
+    <figcaption>RGB NCC, zoomed in: the R channel is placed ~200 px off, producing a ghost.</figcaption></figure>
+  <p><b>Why it fails.</b> NCC only tolerates a <i>linear</i> brightness relationship between channels,
+     $R \approx \alpha B + \beta$. The Emir's robe is bright blue: it is <b>very bright in B and very dark
+     in R</b>, while other areas (the wall, his face) are bright in R. So in some regions B and R are
+     positively related and in others negatively related. No single $\alpha, \beta$ explains both. The best
+     "match" in raw pixel values is then not the true alignment, and because the error happens at the coarsest
+     pyramid level, the ±3 refinement steps cannot recover from it.</p>
+  <p>G sits between B and R in wavelength, so G–B looks more alike and is still aligned correctly.</p>
+
+  <!-- ===================================================== 6 -->
+  <h2 id="bells">6. Bells &amp; Whistles: gradient features</h2>
+  <p><b>Motivation.</b> Brightness differs between channels, but <i>edges</i> are in the same place: the outline
+     of the robe is where it is no matter which filter you look through. So instead of comparing pixel values,
+     compare edges.</p>
+  <p><b>Method.</b> Before scoring, each pyramid level is converted to its <b>gradient magnitude</b> using
+     Sobel filters:
+     $$\lVert\nabla I\rVert = \sqrt{(\partial_x I)^2 + (\partial_y I)^2}$$
+     The rest of the pipeline is unchanged (same NCC, same crop, same pyramid and windows). Taking the
+     magnitude also removes the sign, so "dark-to-bright" and "bright-to-dark" edges look the same.
+     This is the <code>--feature grad</code> option in my code.</p>
+  <p><b>Result.</b> emir's R offset goes from (−205, 141) to <b>(40, 107)</b>, consistent with
+     G (24, 49) and with the "R ≈ 2 × G" pattern seen on the other plates.</p>
+  <div class="pair">
+    <figure><img src="images/emir_zoom_ncc_rgb_refb.jpg" alt="emir zoom with RGB NCC, misaligned"><figcaption><b>Before</b> · RGB NCC · R (−205, 141)</figcaption></figure>
+    <figure><img src="images/emir_zoom_ncc_grad_refb.jpg" alt="emir zoom with gradient NCC, aligned"><figcaption><b>After</b> · gradient NCC · R (40, 107)</figcaption></figure>
+  </div>
+  <div class="pair">
+    <figure><img src="images/emir_pyramid_ncc_rgb_refb.jpg" alt="emir full image with RGB NCC" loading="lazy"><figcaption>Full image, RGB NCC</figcaption></figure>
+    <figure><img src="images/emir_pyramid_ncc_grad_refb.jpg" alt="emir full image with gradient NCC" loading="lazy"><figcaption>Full image, gradient NCC</figcaption></figure>
+  </div>
+  <p>Gradient features do not break anything else. On the other 13 images, the offsets stay within 2 px of
+     the RGB result (visually identical), so all <span class="good">14 / 14</span> images align:</p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>image</th><th>G · RGB</th><th>G · gradient</th><th>R · RGB</th><th>R · gradient</th></tr>
+    <tr><td>church</td><td>(4, 25)</td><td>(4, 25)</td><td>(−4, 58)</td><td>(−4, 58)</td></tr>
+    <tr class="fixed"><td>emir</td><td>(24, 49)</td><td>(24, 49)</td><td>(−205, 141)</td><td>(40, 107)</td></tr>
+    <tr><td>harvesters</td><td>(17, 60)</td><td>(17, 60)</td><td>(13, 124)</td><td>(14, 124)</td></tr>
+    <tr><td>icon</td><td>(17, 41)</td><td>(17, 42)</td><td>(23, 89)</td><td>(23, 90)</td></tr>
+    <tr><td>ilemselga</td><td>(7, 40)</td><td>(7, 40)</td><td>(11, 130)</td><td>(11, 131)</td></tr>
+    <tr><td>melons</td><td>(11, 82)</td><td>(10, 80)</td><td>(13, 178)</td><td>(13, 177)</td></tr>
+    <tr><td>religous_painting</td><td>(3, 28)</td><td>(5, 30)</td><td>(7, 68)</td><td>(6, 70)</td></tr>
+    <tr><td>self_portrait</td><td>(29, 79)</td><td>(29, 78)</td><td>(37, 176)</td><td>(37, 176)</td></tr>
+    <tr><td>siren</td><td>(−6, 49)</td><td>(−6, 49)</td><td>(−25, 96)</td><td>(−24, 96)</td></tr>
+    <tr><td>three_generations</td><td>(14, 53)</td><td>(12, 54)</td><td>(11, 112)</td><td>(9, 111)</td></tr>
+    <tr><td>wharf</td><td>(−7, 15)</td><td>(−7, 15)</td><td>(−16, 83)</td><td>(−16, 83)</td></tr>
+  </table>
+  </div>
+  <p>The cost is small: computing the Sobel filters adds about 1 s per TIF (≈ 7 s instead of ≈ 6 s).</p>
+
+  <!-- ===================================================== 7 -->
+  <h2 id="learned">7. What I learned</h2>
+  <ul>
+    <li><b>The metric encodes an assumption.</b> L2 assumes equal brightness, NCC assumes a linear relation,
+        gradients assume only that edges line up. emir showed exactly where the NCC assumption breaks.</li>
+    <li><b>Borders matter more than expected.</b> Without cropping the interior, the plate edges and the
+        <code>np.roll</code> wrap-around can dominate the score.</li>
+    <li><b>Coarse-to-fine is a huge speed-up</b>, from hours to seconds, but it has a weak point: if the coarsest
+        level is wrong, the small refinement windows cannot fix it.</li>
+    <li><b>Downsample properly.</b> Averaging before subsampling keeps the coarse levels faithful to the real image.</li>
+    <li>Analyzing a failure (and asking which assumption broke) taught me more than the images that worked.</li>
+  </ul>
+
+  <p style="margin-top:3rem;color:var(--muted);font-size:0.9rem">
+    Images: Prokudin-Gorskii Collection, Library of Congress. Offsets are $(dx, dy)$ in pixels relative to the blue channel.
+  </p>
+</body>
+</html>

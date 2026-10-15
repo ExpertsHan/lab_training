@@ -1,0 +1,7 @@
+image,method,tag,g_dx,g_dy,r_dx,r_dy,b_dx,b_dy,time_s
+cathedral.jpg,single,l2_rgb_refb,2,5,3,12,0,0,0.42
+cathedral.jpg,pyramid,l2_rgb_refb,2,5,3,12,0,0,0.1
+monastery.jpg,single,l2_rgb_refb,2,-3,2,3,0,0,0.35
+monastery.jpg,pyramid,l2_rgb_refb,2,-3,2,3,0,0,0.1
+tobolsk.jpg,single,l2_rgb_refb,3,3,3,6,0,0,0.36
+tobolsk.jpg,pyramid,l2_rgb_refb,3,3,3,6,0,0,0.13
